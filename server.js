@@ -51,6 +51,21 @@ app.post("/send", async (req, res) => {
   res.status(200).json({ success: true });
 });
 
+app.get("/send", async (req, res) => {
+  const payload = JSON.stringify({
+    title: "Test Notification",
+    body: "Push is working 🎉"
+  });
+
+  try {
+    await webpush.sendNotification(subscription, payload);
+    res.send("Push sent!");
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error sending push");
+  }
+});
+
 /* ============================= */
 
 const PORT = process.env.PORT || 3000;
