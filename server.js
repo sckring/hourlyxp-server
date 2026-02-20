@@ -1,6 +1,7 @@
 const express = require("express");
 const webpush = require("web-push");
 const cors = require("cors");
+const subscriptions = []; // stores all push subscriptions
 
 const app = express();
 app.use(express.json());
@@ -25,9 +26,11 @@ let subscriptions = [];
    Save Subscription
    ============================= */
 
-app.post("/subscribe", (req, res) => {
-  subscriptions.push(req.body);
-  res.status(201).json({});
+app.post("/subscribe", express.json(), (req, res) => {
+  const subscription = req.body;
+  subscriptions.push(subscription);
+  console.log("New subscription added");
+  res.status(201).send("Subscribed");
 });
 
 /* =============================
@@ -58,8 +61,43 @@ app.get("/send", async (req, res) => {
   });
 
   try {
-    await webpush.sendNotification(subscription, payload);
+    for (const sub of subscriptions) {
+      await webpush.sendNotification(sub, payload);
+    }
+
     res.send("Push sent!");
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error sending push");
+  }
+});
+
+app.post("/report", async (req, res) => {
+  const { dailyTotal, weeklyTotal, dailyGoal, weeklyGoal } = req.body;
+
+  try {
+    for (const sub of subscriptions) {
+
+      if (dailyGoal && dailyTotal >= dailyGoal && !sub.dailyNotified) {
+        await webpush.sendNotification(sub, JSON.stringify({
+          title: "🎉 Daily Goal Reached!",
+          body: `You earned $${dailyTotal.toFixed(2)} today!`
+        }));
+        sub.dailyNotified = true;
+      }
+
+      if (weeklyGoal && weeklyTotal >= weeklyGoal && !sub.weeklyNotified) {
+        await webpush.sendNotification(sub, JSON.stringify({
+          title: "🏆 Weekly Goal Crushed!",
+          body: `Weekly total: $${weeklyTotal.toFixed(2)}`
+        }));
+        sub.weeklyNotified = true;
+      }
+    }
+
+    res.send("Push checked");
+
   } catch (err) {
     console.error(err);
     res.status(500).send("Error sending push");
