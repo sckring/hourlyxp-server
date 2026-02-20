@@ -1,7 +1,6 @@
 const express = require("express");
 const webpush = require("web-push");
 const cors = require("cors");
-const subscriptions = []; // stores all push subscriptions
 
 const app = express();
 app.use(express.json());
@@ -66,11 +65,11 @@ app.get("/send", async (req, res) => {
     }
 
     res.send("Push sent!");
-
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Error sending push");
+    console.error("FULL PUSH ERROR:", err);
+    res.status(500).send(err.message);
   }
+});
 });
 
 app.post("/report", async (req, res) => {
