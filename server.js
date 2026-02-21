@@ -89,6 +89,49 @@ for (const row of subs) {
   }
 });
 
+setInterval(async () => {
+  const { data: shifts } = await supabase
+    .from("shifts")
+    .select("*")
+    .eq("active", true);
+
+  if (!shifts) return;
+
+  for (const shift of shifts) {
+    const now = Date.now();
+    const hours = (now - shift.start_time) / 1000 / 60 / 60;
+    const earnings = hours * shift.hourly_rate;
+
+    if (
+      shift.daily_goal &&
+      earnings >= shift.daily_goal &&
+      !shift.daily_notified
+    ) {
+
+      const { data: subs } = await supabase
+        .from("subscriptions")
+        .select("subscription")
+        .eq("user_id", shift.user_id);
+
+      if (!subs || subs.length === 0) continue;
+
+      await webpush.sendNotification(
+        subs[0].subscription,
+        JSON.stringify({
+          title: "🎉 Daily Goal Reached!",
+          body: `You've earned $${earnings.toFixed(2)}`
+        })
+      );
+
+      await supabase
+        .from("shifts")
+        .update({ daily_notified: true })
+        .eq("id", shift.id);
+    }
+  }
+
+}, 60 * 1000);
+
 /* ============================= */
 
 const PORT = process.env.PORT || 3000;
