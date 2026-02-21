@@ -3,7 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const supabase = createClient(
   process.env.https://xjfjfouaxilcrvuwcjye.supabase.co,
-  process.env.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZmpmb3VheGlsY3J2dXdjanllIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTY3Njc1NSwiZXhwIjoyMDg3MjUyNzU1fQ.Y8JgoSlIKp95qBQj_2Rf-kfFXKSeBTwY4ouXjW2mKlw
+  process.env.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZmpmb3VheGlsY3J2dXdjanllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE2NzY3NTUsImV4cCI6MjA4NzI1Mjc1NX0.sHqxmT_BlrdPvH7LXx2MNROVZW6mRz08YkI_FbXsymI
 );
 
 const express = require("express");
