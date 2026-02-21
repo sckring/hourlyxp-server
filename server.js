@@ -28,11 +28,11 @@ console.log("Supabase URL:", process.env.SUPABASE_URL);
 /* ============================= */
 
 app.post("/subscribe", async (req, res) => {
-  const { userId, subscription } = req.body;
+  const subscription = req.body;
 
   const { error } = await supabase
     .from("subscriptions")
-    .insert([{ user_id: userId, subscription }]);
+    .insert([{ subscription }]);
 
   if (error) return res.status(500).send(error.message);
 
