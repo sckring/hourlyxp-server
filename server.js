@@ -71,9 +71,16 @@ app.get("/send", async (req, res) => {
   });
 
   try {
-    for (const sub of subscriptions) {
-      await webpush.sendNotification(sub, payload);
-    }
+   const { data: subs } = await supabase
+  .from("subscriptions")
+  .select("subscription");
+
+for (const row of subs) {
+  await webpush.sendNotification(
+    row.subscription,
+    payload
+  );
+}
 
     res.send("Push sent!");
   } catch (err) {
