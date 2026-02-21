@@ -91,27 +91,6 @@ for (const row of subs) {
 
 /* ============================= */
 
-setInterval(async () => {
-  const now = Date.now();
-
-  for (const shift of activeShifts) {
-    const hoursWorked = (now - shift.startTime) / 1000 / 60 / 60;
-    const earnings = hoursWorked * shift.hourlyRate;
-
-    if (shift.dailyGoal && earnings >= shift.dailyGoal && !shift.dailyNotified) {
-      await webpush.sendNotification(
-        shift.subscription,
-        JSON.stringify({
-          title: "🎉 Daily Goal Reached!",
-          body: `You've earned $${earnings.toFixed(2)}`
-        })
-      );
-      shift.dailyNotified = true;
-    }
-  }
-
-}, 60 * 1000); // every minute
-
 const PORT = process.env.PORT || 3000;
 
 app.post("/register", async (req, res) => {
