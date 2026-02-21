@@ -1,3 +1,11 @@
+const { createClient } = require('@supabase/supabase-js');
+const { v4: uuidv4 } = require('uuid');
+
+const supabase = createClient(
+  process.env.https://xjfjfouaxilcrvuwcjye.supabase.co,
+  process.env.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZmpmb3VheGlsY3J2dXdjanllIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTY3Njc1NSwiZXhwIjoyMDg3MjUyNzU1fQ.Y8JgoSlIKp95qBQj_2Rf-kfFXKSeBTwY4ouXjW2mKlw
+);
+
 const express = require("express");
 const webpush = require("web-push");
 const cors = require("cors");
@@ -21,36 +29,38 @@ webpush.setVapidDetails(
 
 /* ============================= */
 
-let activeShifts = [];
-let subscriptions = [];
+console.log("Supabase URL:", process.env.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqZmpmb3VheGlsY3J2dXdjanllIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTY3Njc1NSwiZXhwIjoyMDg3MjUyNzU1fQ.Y8JgoSlIKp95qBQj_2Rf-kfFXKSeBTwY4ouXjW2mKlw
+	);
 
 /* ============================= */
 /* Save Subscription */
 /* ============================= */
 
-app.post("/subscribe", (req, res) => {
-  const subscription = req.body;
+app.post("/subscribe", async (req, res) => {
+  const { userId, subscription } = req.body;
 
-  subscriptions.push(subscription);
+  const { error } = await supabase
+    .from("subscriptions")
+    .insert([{ user_id: userId, subscription }]);
 
-  console.log("New subscription added");
-  res.status(201).send("Subscribed");
+  if (error) return res.status(500).send(error.message);
+
+  res.send("Subscribed");
 });
 
-app.post("/startShift", (req, res) => {
-  const { startTime, hourlyRate, dailyGoal, weeklyGoal } = req.body;
+app.post("/startShift", async (req, res) => {
+  const { userId, startTime, hourlyRate, dailyGoal } = req.body;
 
-  const subscription = subscriptions[0]; // basic version
+  const { error } = await supabase
+    .from("shifts")
+    .insert([{
+      user_id: userId,
+      start_time: startTime,
+      hourly_rate: hourlyRate,
+      daily_goal: dailyGoal
+    }]);
 
-  activeShifts.push({
-    startTime,
-    hourlyRate,
-    dailyGoal,
-    weeklyGoal,
-    subscription,
-    dailyNotified: false,
-    weeklyNotified: false
-  });
+  if (error) return res.status(500).send(error.message);
 
   res.send("Shift started");
 });
@@ -105,6 +115,18 @@ setInterval(async () => {
 }, 60 * 1000); // every minute
 
 const PORT = process.env.PORT || 3000;
+
+app.post("/register", async (req, res) => {
+  const userId = uuidv4();
+
+  const { error } = await supabase
+    .from("users")
+    .insert([{ id: userId }]);
+
+  if (error) return res.status(500).send(error.message);
+
+  res.json({ userId });
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

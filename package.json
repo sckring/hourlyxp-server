@@ -11,8 +11,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@supabase/supabase-js": "^2.97.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "uuid": "^13.0.0",
     "web-push": "^3.6.7"
   }
 }
