@@ -28,15 +28,19 @@ console.log("Supabase URL:", process.env.SUPABASE_URL);
 /* ============================= */
 
 app.post("/subscribe", async (req, res) => {
-  const subscription = req.body;
+  const subscription = req.body; // Expect full subscription JSON
 
+  // Insert into Supabase
   const { error } = await supabase
     .from("subscriptions")
     .insert([{ subscription }]);
 
-  if (error) return res.status(500).send(error.message);
+  if (error) {
+    console.error("Supabase insert error:", error);
+    return res.status(500).send(error.message);
+  }
 
-  res.send("Subscribed");
+  res.send("Subscribed successfully");
 });
 
 app.post("/startShift", async (req, res) => {
