@@ -48,7 +48,9 @@ app.post("/startShift", async (req, res) => {
       user_id: userId,
       start_time: startTime,
       hourly_rate: hourlyRate,
-      daily_goal: dailyGoal
+      daily_goal: dailyGoal,
+      active: true,
+      daily_notified: false
     }]);
 
   if (error) return res.status(500).send(error.message);
@@ -61,9 +63,6 @@ app.post("/startShift", async (req, res) => {
 /* ============================= */
 
 app.get("/send", async (req, res) => {
-  if (subscriptions.length === 0) {
-    return res.send("No subscriptions stored.");
-  }
 
   const payload = JSON.stringify({
     title: "Test Notification",
@@ -90,16 +89,24 @@ for (const row of subs) {
 });
 
 setInterval(async () => {
-  const { data: shifts } = await supabase
+  console.log("Checking shifts...");
+
+  const { data: shifts, error } = await supabase
     .from("shifts")
     .select("*")
     .eq("active", true);
 
-  if (!shifts) return;
+  if (error) {
+    console.error("Shift fetch error:", error);
+    return;
+  }
+
+  if (!shifts || shifts.length === 0) return;
 
   for (const shift of shifts) {
     const now = Date.now();
-    const hours = (now - shift.start_time) / 1000 / 60 / 60;
+    const start = new Date(shift.start_time).getTime();
+    const hours = (now - start) / 1000 / 60 / 60;
     const earnings = hours * shift.hourly_rate;
 
     if (
@@ -107,6 +114,7 @@ setInterval(async () => {
       earnings >= shift.daily_goal &&
       !shift.daily_notified
     ) {
+      console.log("Goal reached for:", shift.user_id);
 
       const { data: subs } = await supabase
         .from("subscriptions")
@@ -115,13 +123,15 @@ setInterval(async () => {
 
       if (!subs || subs.length === 0) continue;
 
-      await webpush.sendNotification(
-        subs[0].subscription,
-        JSON.stringify({
-          title: "🎉 Daily Goal Reached!",
-          body: `You've earned $${earnings.toFixed(2)}`
-        })
-      );
+      for (const sub of subs) {
+        await webpush.sendNotification(
+          sub.subscription,
+          JSON.stringify({
+            title: "🎉 Daily Goal Reached!",
+            body: `You've earned $${earnings.toFixed(2)}`
+          })
+        );
+      }
 
       await supabase
         .from("shifts")
