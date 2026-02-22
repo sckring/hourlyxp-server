@@ -157,7 +157,7 @@ setInterval(async () => {
 
     console.log("Checking goals...");
 
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
     // Get ALL shifts from last 7 days
     const { data: shifts, error } = await supabase
