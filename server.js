@@ -71,7 +71,7 @@ async function sendToUser(userId, payloadObj) {
 app.post("/startShift", async (req, res) => {
   const { userId, startTime, hourlyRate, dailyGoal, weeklyGoal } = req.body;
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("shifts")
     .insert([{
       user_id: userId,
@@ -82,11 +82,13 @@ app.post("/startShift", async (req, res) => {
       active: true,
       daily_notified: false,
       weekly_notified: false
-    }]);
+    }])
+    .select()
+    .single();
 
   if (error) return res.status(500).send(error.message);
 
-  res.send("Shift started");
+  res.json(data);
 });
 
 /* ============================= */
