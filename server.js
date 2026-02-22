@@ -40,8 +40,36 @@ app.post("/subscribe", async (req, res) => {
   res.sendStatus(200);
 });
 
+async function sendToUser(userId, payloadObj) {
+  const payload = JSON.stringify(payloadObj);
+
+  const { data: subs } = await supabase
+    .from("subscriptions")
+    .select("id, subscription")
+    .eq("user_id", userId);
+
+  if (!subs || subs.length === 0) return;
+
+  for (const row of subs) {
+    try {
+      await webpush.sendNotification(row.subscription, payload);
+    } catch (err) {
+      // Auto-clean expired subscriptions
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        await supabase
+          .from("subscriptions")
+          .delete()
+          .eq("id", row.id);
+      } else {
+        console.error("Push error:", err.message);
+      }
+    }
+  }
+}
+
+
 app.post("/startShift", async (req, res) => {
-  const { userId, startTime, hourlyRate, dailyGoal } = req.body;
+  const { userId, startTime, hourlyRate, dailyGoal, weeklyGoal } = req.body;
 
   const { error } = await supabase
     .from("shifts")
@@ -50,8 +78,10 @@ app.post("/startShift", async (req, res) => {
       start_time: startTime,
       hourly_rate: hourlyRate,
       daily_goal: dailyGoal,
+      weekly_goal: weeklyGoal,
       active: true,
-      daily_notified: false
+      daily_notified: false,
+      weekly_notified: false
     }]);
 
   if (error) return res.status(500).send(error.message);
@@ -148,22 +178,10 @@ setInterval(async () => {
     ) {
       console.log("Goal reached for:", shift.user_id);
 
-      const { data: subs } = await supabase
-        .from("subscriptions")
-        .select("subscription")
-        .eq("user_id", shift.user_id);
-
-      if (!subs || subs.length === 0) continue;
-
-      for (const sub of subs) {
-        await webpush.sendNotification(
-          sub.subscription,
-          JSON.stringify({
-            title: "🎉 Daily Goal Reached!",
-            body: `You've earned $${earnings.toFixed(2)}`
-          })
-        );
-      }
+     await sendToUser(shift.user_id, {
+  title: "🎉 Daily Goal Reached!",
+  body: `You've earned $${earnings.toFixed(2)}`
+});
 
       await supabase
         .from("shifts")
@@ -171,6 +189,36 @@ setInterval(async () => {
         .eq("id", shift.id);
     }
   }
+  
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+const { data: weekShifts } = await supabase
+  .from("shifts")
+  .select("*")
+  .eq("user_id", shift.user_id)
+  .gte("start_time", new Date(weekAgo).toISOString());
+
+const weeklyTotal = weekShifts.reduce((sum, s) => {
+  const start = new Date(s.start_time).getTime();
+  const hours = (Date.now() - start) / 1000 / 60 / 60;
+  return sum + hours * s.hourly_rate;
+}, 0);
+
+if (
+  shift.weekly_goal &&
+  weeklyTotal >= shift.weekly_goal &&
+  !shift.weekly_notified
+) {
+  await sendToUser(shift.user_id, {
+    title: "🏆 Weekly Goal Crushed!",
+    body: `Weekly total: $${weeklyTotal.toFixed(2)}`
+  });
+
+  await supabase
+    .from("shifts")
+    .update({ weekly_notified: true })
+    .eq("id", shift.id);
+}
 
 }, 60 * 1000);
 
