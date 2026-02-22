@@ -31,14 +31,6 @@ app.post("/subscribe", async (req, res) => {
   try {
     const { userId, subscription } = req.body;
 
-    if (!userId) {
-      return res.status(400).send("Missing userId");
-    }
-
-    if (!subscription) {
-      return res.status(400).send("Missing subscription object");
-    }
-
     const { data, error } = await supabase
       .from("subscriptions")
       .insert([{
@@ -50,13 +42,13 @@ app.post("/subscribe", async (req, res) => {
     if (error) {
       return res.status(500).json({
         message: "Supabase error",
-        error
+        details: error
       });
     }
 
     res.json({
-      message: "Saved successfully",
-      inserted: data
+      message: "Inserted",
+      data
     });
 
   } catch (err) {
