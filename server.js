@@ -188,38 +188,51 @@ setInterval(async () => {
       }
 
       // WEEKLY CHECK (safe version)
-      if (shift.weekly_goal && !shift.weekly_notified) {
+      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
-        const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+const { data: weekShifts, error: weekError } = await supabase
+  .from("shifts")
+  .select("*")
+  .gte("start_time", new Date(weekAgo).toISOString());
 
-        const { data: weekShifts, error: weekError } = await supabase
-          .from("shifts")
-          .select("*")
-          .eq("user_id", shift.user_id)
-          .gte("start_time", new Date(weekAgo).toISOString());
+if (weekError) throw weekError;
 
-        if (weekError) throw weekError;
-        if (!weekShifts) continue;
+if (weekShifts && weekShifts.length > 0) {
 
-        const weeklyTotal = weekShifts.reduce((sum, s) => {
-          const sStart = new Date(s.start_time).getTime();
-          const sHours = (Date.now() - sStart) / 1000 / 60 / 60;
-          return sum + sHours * s.hourly_rate;
-        }, 0);
+  // Group by user
+  const users = [...new Set(weekShifts.map(s => s.user_id))];
 
-        if (weeklyTotal >= shift.weekly_goal) {
-          await sendToUser(shift.user_id, {
-            title: "🏆 Weekly Goal Crushed!",
-            body: `Weekly total: $${weeklyTotal.toFixed(2)}`
-          });
+  for (const userId of users) {
 
-          await supabase
-            .from("shifts")
-            .update({ weekly_notified: true })
-            .eq("id", shift.id);
-        }
-      }
+    const userShifts = weekShifts.filter(s => s.user_id === userId);
+
+    const weeklyTotal = userShifts.reduce((sum, s) => {
+      const sStart = new Date(s.start_time).getTime();
+      const sHours = (Date.now() - sStart) / 1000 / 60 / 60;
+      return sum + sHours * s.hourly_rate;
+    }, 0);
+
+    // Get any shift for weekly_goal reference
+    const shiftWithGoal = userShifts.find(s => s.weekly_goal);
+
+    if (
+      shiftWithGoal &&
+      !shiftWithGoal.weekly_notified &&
+      weeklyTotal >= shiftWithGoal.weekly_goal
+    ) {
+
+      await sendToUser(userId, {
+        title: "🏆 Weekly Goal Crushed!",
+        body: `Weekly total: $${weeklyTotal.toFixed(2)}`
+      });
+
+      await supabase
+        .from("shifts")
+        .update({ weekly_notified: true })
+        .eq("user_id", userId);
     }
+  }
+}
 
   } catch (err) {
     console.error("Shift checker crash:", err);
