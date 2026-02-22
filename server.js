@@ -28,35 +28,16 @@ console.log("Supabase URL:", process.env.SUPABASE_URL);
 /* ============================= */
 
 app.post("/subscribe", async (req, res) => {
-  try {
-    const { userId, subscription } = req.body;
+  const { userId, subscription } = req.body;
 
-    const { data, error } = await supabase
-      .from("subscriptions")
-      .insert([{
-        user_id: userId,
-        subscription: subscription
-      }])
-      .select();
+  await supabase
+    .from("subscriptions")
+    .upsert(
+      { user_id: userId, subscription },
+      { onConflict: "user_id" }
+    );
 
-    if (error) {
-      return res.status(500).json({
-        message: "Supabase error",
-        details: error
-      });
-    }
-
-    res.json({
-      message: "Inserted",
-      data
-    });
-
-  } catch (err) {
-    res.status(500).json({
-      message: "Server crash",
-      error: err.message
-    });
-  }
+  res.sendStatus(200);
 });
 
 app.post("/startShift", async (req, res) => {
@@ -83,29 +64,55 @@ app.post("/startShift", async (req, res) => {
 /* ============================= */
 
 app.get("/send", async (req, res) => {
-
   const payload = JSON.stringify({
     title: "Test Notification",
     body: "Push is working 🎉"
   });
 
-  try {
-   const { data: subs } = await supabase
-  .from("subscriptions")
-  .select("subscription");
+  const { data: subs, error } = await supabase
+    .from("subscriptions")
+    .select("id, subscription");
 
-for (const row of subs) {
-  await webpush.sendNotification(
-    row.subscription,
-    payload
-  );
-}
-
-    res.send("Push sent!");
-  } catch (err) {
-    console.error("Push error:", err);
-    res.status(500).send(err.message);
+  if (error) {
+    console.error("Fetch error:", error);
+    return res.status(500).send("Failed to fetch subscriptions");
   }
+
+  if (!subs || subs.length === 0) {
+    return res.send("No subscriptions found");
+  }
+
+  let sent = 0;
+  let failed = 0;
+  let removed = 0;
+
+  for (const row of subs) {
+    try {
+      await webpush.sendNotification(row.subscription, payload);
+      sent++;
+    } catch (err) {
+      failed++;
+
+      // Remove expired or invalid subscriptions
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        await supabase
+          .from("subscriptions")
+          .delete()
+          .eq("id", row.id);
+
+        removed++;
+      } else {
+        console.error("Push error:", err.message);
+      }
+    }
+  }
+
+  res.json({
+    total: subs.length,
+    sent,
+    failed,
+    removed
+  });
 });
 
 //DEBUG TEMP
