@@ -204,11 +204,19 @@ setInterval(async () => {
 
         const userShifts = weekShifts.filter(s => s.user_id === userId);
 
-        const weeklyTotal = userShifts.reduce((sum, s) => {
-          const sStart = new Date(s.start_time).getTime();
-          const sHours = (Date.now() - sStart) / 1000 / 60 / 60;
-          return sum + sHours * s.hourly_rate;
-        }, 0);
+       const weeklyTotal = userShifts.reduce((sum, s) => {
+  if (s.total_earned) {
+    return sum + s.total_earned;
+  }
+
+  if (s.active) {
+    const sStart = new Date(s.start_time).getTime();
+    const sHours = (Date.now() - sStart) / 1000 / 60 / 60;
+    return sum + sHours * s.hourly_rate;
+  }
+
+  return sum;
+}, 0);
 
         const shiftWithGoal = userShifts.find(s => s.weekly_goal);
 
@@ -236,6 +244,36 @@ setInterval(async () => {
   }
 
 }, 60 * 1000);
+
+app.post("/endShift", async (req, res) => {
+  const { shiftId, endTime } = req.body;
+
+  const { data: shift, error } = await supabase
+    .from("shifts")
+    .select("*")
+    .eq("id", shiftId)
+    .single();
+
+  if (error || !shift) {
+    return res.status(400).send("Shift not found");
+  }
+
+  const start = new Date(shift.start_time).getTime();
+  const end = new Date(endTime).getTime();
+  const hours = (end - start) / 1000 / 60 / 60;
+  const totalEarned = hours * shift.hourly_rate;
+
+  await supabase
+    .from("shifts")
+    .update({
+      end_time: endTime,
+      total_earned: totalEarned,
+      active: false
+    })
+    .eq("id", shiftId);
+
+  res.send("Shift ended");
+});
 
 /* ============================= */
 
