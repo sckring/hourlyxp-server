@@ -28,12 +28,18 @@ console.log("Supabase URL:", process.env.SUPABASE_URL);
 /* ============================= */
 
 app.post("/subscribe", async (req, res) => {
-  const subscription = req.body; // Expect full subscription JSON
+  const { userId, subscription } = req.body;
 
-  // Insert into Supabase
+  if (!userId || !subscription) {
+    return res.status(400).send("Missing userId or subscription");
+  }
+
   const { error } = await supabase
     .from("subscriptions")
-    .insert([{ subscription }]);
+    .insert([{
+      user_id: userId,
+      subscription: subscription
+    }]);
 
   if (error) {
     console.error("Supabase insert error:", error);
