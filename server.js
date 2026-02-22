@@ -116,6 +116,11 @@ for (const row of subs) {
   }
 });
 
+//DEBUG TEMP
+app.post("/debug", (req, res) => {
+  res.json(req.body);
+});
+
 setInterval(async () => {
   console.log("Checking shifts...");
 
