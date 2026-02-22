@@ -11,7 +11,7 @@ app.use(cors());
 // ✅ Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // 🔑 VAPID keys
@@ -28,25 +28,43 @@ console.log("Supabase URL:", process.env.SUPABASE_URL);
 /* ============================= */
 
 app.post("/subscribe", async (req, res) => {
-  const { userId, subscription } = req.body;
+  try {
+    const { userId, subscription } = req.body;
 
-  if (!userId || !subscription) {
-    return res.status(400).send("Missing userId or subscription");
+    if (!userId) {
+      return res.status(400).send("Missing userId");
+    }
+
+    if (!subscription) {
+      return res.status(400).send("Missing subscription object");
+    }
+
+    const { data, error } = await supabase
+      .from("subscriptions")
+      .insert([{
+        user_id: userId,
+        subscription: subscription
+      }])
+      .select();
+
+    if (error) {
+      return res.status(500).json({
+        message: "Supabase error",
+        error
+      });
+    }
+
+    res.json({
+      message: "Saved successfully",
+      inserted: data
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      message: "Server crash",
+      error: err.message
+    });
   }
-
-  const { error } = await supabase
-    .from("subscriptions")
-    .insert([{
-      user_id: userId,
-      subscription: subscription
-    }]);
-
-  if (error) {
-    console.error("Supabase insert error:", error);
-    return res.status(500).send(error.message);
-  }
-
-  res.send("Subscribed successfully");
 });
 
 app.post("/startShift", async (req, res) => {
