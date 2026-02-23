@@ -149,7 +149,7 @@ app.post("/debug", (req, res) => {
   res.json(req.body);
 });
 
-etInterval(async () => {
+setInterval(async () => {
   try {
 
     const { data: activeShifts } = await supabase
