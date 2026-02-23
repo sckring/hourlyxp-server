@@ -69,21 +69,30 @@ async function sendToUser(userId, payloadObj) {
 
 
 app.post("/startShift", async (req, res) => {
+  console.log("START SHIFT BODY:", req.body);
+
   const { userId, startTime, hourlyRate } = req.body;
+
+  if (!userId || !startTime || !hourlyRate) {
+    console.log("Missing fields!");
+    return res.status(400).json({ error: "Missing required fields" });
+  }
 
   const { data, error } = await supabase
     .from("shifts")
     .insert([{
-  user_id: userId,
-  start_time: startTime,
-  hourly_rate: hourlyRate,
-  active: true,
-  daily_notified: false
-}])
+      user_id: userId,
+      start_time: startTime,
+      hourly_rate: hourlyRate,
+      active: true,
+      daily_notified: false
+    }])
     .select()
     .single();
 
-  if (error) return res.status(500).send(error.message);
+  console.log("INSERT RESULT:", data, error);
+
+  if (error) return res.status(500).json({ error });
 
   res.json(data);
 });
