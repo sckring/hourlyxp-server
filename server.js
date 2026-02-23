@@ -69,20 +69,17 @@ async function sendToUser(userId, payloadObj) {
 
 
 app.post("/startShift", async (req, res) => {
-  const { userId, startTime, hourlyRate, dailyGoal, weeklyGoal } = req.body;
+  const { userId, startTime, hourlyRate } = req.body;
 
   const { data, error } = await supabase
     .from("shifts")
     .insert([{
-      user_id: userId,
-      start_time: startTime,
-      hourly_rate: hourlyRate,
-      daily_goal: dailyGoal,
-      weekly_goal: weeklyGoal,
-      active: true,
-      daily_notified: false,
-      weekly_notified: false
-    }])
+  user_id: userId,
+  start_time: startTime,
+  hourly_rate: hourlyRate,
+  active: true,
+  daily_notified: false
+}])
     .select()
     .single();
 
@@ -152,108 +149,85 @@ app.post("/debug", (req, res) => {
   res.json(req.body);
 });
 
-setInterval(async () => {
+etInterval(async () => {
   try {
 
-    console.log("Checking goals...");
-
-    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-
-    // Get ALL shifts from last 7 days
-    const { data: shifts, error } = await supabase
+    const { data: activeShifts } = await supabase
       .from("shifts")
       .select("*")
-      .gte("start_time", weekAgo);
+      .eq("active", true);
 
-    if (error) throw error;
-    if (!shifts || shifts.length === 0) return;
+    if (!activeShifts) return;
 
-    // Group shifts by user
-    const users = [...new Set(shifts.map(s => s.user_id))];
+    const users = [...new Set(activeShifts.map(s => s.user_id))];
 
     for (const userId of users) {
 
-      const userShifts = shifts.filter(s => s.user_id === userId);
+      const { data: user } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", userId)
+        .single();
+
+      if (!user) continue;
+
+      const userShifts = activeShifts.filter(s => s.user_id === userId);
 
       let weeklyTotal = 0;
-      let weeklyGoal = 0;
-      let weeklyNotified = false;
 
-      for (const shift of userShifts) {
+      const weekAgo = new Date(Date.now() - 7*24*60*60*1000);
 
-        // capture goal + notified status from any shift
-        if (shift.weekly_goal) weeklyGoal = shift.weekly_goal;
-        if (shift.weekly_notified) weeklyNotified = true;
+      const { data: recentShifts } = await supabase
+        .from("shifts")
+        .select("*")
+        .eq("user_id", userId)
+        .gte("start_time", weekAgo.toISOString());
 
-        // completed shift
-        if (shift.total_earned) {
+      for (const shift of recentShifts || []) {
+        if (shift.total_earned)
           weeklyTotal += Number(shift.total_earned);
-        }
-
-        // active shift running earnings
-        else if (shift.active) {
-          const start = new Date(shift.start_time).getTime();
-          const hours = (Date.now() - start) / 1000 / 60 / 60;
-          weeklyTotal += hours * shift.hourly_rate;
-        }
       }
 
-      // 🔔 WEEKLY CHECK
+      for (const shift of userShifts) {
+        const start = new Date(shift.start_time).getTime();
+        const hours = (Date.now() - start) / 1000 / 60 / 60;
+        weeklyTotal += hours * shift.hourly_rate;
+      }
+
       if (
-        weeklyGoal > 0 &&
-        weeklyTotal >= weeklyGoal &&
-        !weeklyNotified
+        user.weekly_goal &&
+        weeklyTotal >= user.weekly_goal &&
+        !user.weekly_notified
       ) {
-
-        console.log("WEEKLY TRIGGERED for user:", userId);
-
         await sendToUser(userId, {
           title: "🏆 Weekly Goal Crushed!",
           body: `Weekly total: $${weeklyTotal.toFixed(2)}`
         });
 
-        // mark all that user's shifts as notified
         await supabase
-          .from("shifts")
+          .from("users")
           .update({ weekly_notified: true })
-          .eq("user_id", userId);
+          .eq("id", userId);
       }
 
-      // 🔔 DAILY CHECK (active shift only)
-      const activeShift = userShifts.find(s => s.active);
-
-      if (activeShift) {
-
-        const start = new Date(activeShift.start_time).getTime();
-        const hours = (Date.now() - start) / 1000 / 60 / 60;
-        const earnings = hours * activeShift.hourly_rate;
-
-        if (
-          activeShift.daily_goal &&
-          earnings >= activeShift.daily_goal &&
-          !activeShift.daily_notified
-        ) {
-
-          console.log("DAILY TRIGGERED for user:", userId);
-
-          await sendToUser(userId, {
-            title: "🎉 Daily Goal Reached!",
-            body: `You've earned $${earnings.toFixed(2)}`
-          });
-
-          await supabase
-            .from("shifts")
-            .update({ daily_notified: true })
-            .eq("id", activeShift.id);
-        }
-      }
     }
 
   } catch (err) {
     console.error("Goal checker crash:", err);
   }
 
-}, 60 * 1000);
+}, 60000);
+
+app.post("/resetDaily", async (req, res) => {
+  const { userId } = req.body;
+
+  await supabase
+    .from("shifts")
+    .update({ daily_notified: false })
+    .eq("user_id", userId);
+
+  res.sendStatus(200);
+});
 
 app.post("/endShift", async (req, res) => {
   const { shiftId, endTime } = req.body;
@@ -283,6 +257,21 @@ app.post("/endShift", async (req, res) => {
     .eq("id", shiftId);
 
   res.send("Shift ended");
+});
+
+app.post("/updateGoals", async (req, res) => {
+  const { userId, dailyGoal, weeklyGoal } = req.body;
+
+  await supabase
+    .from("users")
+    .update({
+      daily_goal: dailyGoal,
+      weekly_goal: weeklyGoal,
+      weekly_notified: false
+    })
+    .eq("id", userId);
+
+  res.sendStatus(200);
 });
 
 /* ============================= */
