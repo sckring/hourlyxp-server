@@ -74,15 +74,17 @@ app.post("/startShift", async (req, res) => {
   const { userId, startTime, hourlyRate } = req.body;
 
   if (!userId || !startTime || !hourlyRate) {
-    console.log("Missing fields!");
     return res.status(400).json({ error: "Missing required fields" });
   }
+
+  // Convert ISO string to milliseconds
+  const startTimeNum = new Date(startTime).getTime();
 
   const { data, error } = await supabase
     .from("shifts")
     .insert([{
       user_id: userId,
-      start_time: startTime,
+      start_time: startTimeNum,
       hourly_rate: hourlyRate,
       active: true,
       daily_notified: false
@@ -160,7 +162,6 @@ app.post("/debug", (req, res) => {
 
 setInterval(async () => {
   try {
-
     const { data: activeShifts } = await supabase
       .from("shifts")
       .select("*")
@@ -169,6 +170,8 @@ setInterval(async () => {
     if (!activeShifts) return;
 
     const users = [...new Set(activeShifts.map(s => s.user_id))];
+
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000; // BIGINT timestamp
 
     for (const userId of users) {
 
@@ -184,21 +187,21 @@ setInterval(async () => {
 
       let weeklyTotal = 0;
 
-      const weekAgo = new Date(Date.now() - 7*24*60*60*1000);
-
+      // Fetch recent shifts by numeric comparison
       const { data: recentShifts } = await supabase
         .from("shifts")
         .select("*")
         .eq("user_id", userId)
-        .gte("start_time", weekAgo.toISOString());
+        .gte("start_time", weekAgo);
 
       for (const shift of recentShifts || []) {
         if (shift.total_earned)
           weeklyTotal += Number(shift.total_earned);
       }
 
+      // Include currently active shifts
       for (const shift of userShifts) {
-        const start = new Date(shift.start_time).getTime();
+        const start = Number(shift.start_time);
         const hours = (Date.now() - start) / 1000 / 60 / 60;
         weeklyTotal += hours * shift.hourly_rate;
       }
@@ -229,18 +232,28 @@ setInterval(async () => {
 
 app.post("/resetDaily", async (req, res) => {
   const { userId } = req.body;
+  if (!userId) return res.status(400).send("Missing userId");
 
-  await supabase
+  const now = Date.now(); // BIGINT timestamp
+
+  const { error } = await supabase
     .from("shifts")
     .update({ daily_notified: false })
     .eq("user_id", userId);
 
-  res.sendStatus(200);
+  if (error) return res.status(500).json({ error });
+
+  res.json({ success: true, resetAt: now });
 });
 
 app.post("/endShift", async (req, res) => {
   const { shiftId, endTime } = req.body;
 
+  if (!shiftId || !endTime) {
+    return res.status(400).send("Missing required fields");
+  }
+
+  // Fetch the shift
   const { data: shift, error } = await supabase
     .from("shifts")
     .select("*")
@@ -251,21 +264,27 @@ app.post("/endShift", async (req, res) => {
     return res.status(400).send("Shift not found");
   }
 
-  const start = new Date(shift.start_time).getTime();
-  const end = new Date(endTime).getTime();
-  const hours = (end - start) / 1000 / 60 / 60;
-  const totalEarned = hours * shift.hourly_rate;
+  // Convert ISO endTime to milliseconds
+  const endTimeNum = new Date(endTime).getTime();
+  const startTimeNum = Number(shift.start_time);
 
-  await supabase
+  // Calculate total earned
+  const hoursWorked = (endTimeNum - startTimeNum) / 1000 / 60 / 60;
+  const totalEarned = hoursWorked * shift.hourly_rate;
+
+  // Update the shift
+  const { error: updateError } = await supabase
     .from("shifts")
     .update({
-      end_time: endTime,
+      end_time: endTimeNum,
       total_earned: totalEarned,
       active: false
     })
     .eq("id", shiftId);
 
-  res.send("Shift ended");
+  if (updateError) return res.status(500).json({ error: updateError });
+
+  res.send("Shift ended successfully");
 });
 
 app.post("/updateGoals", async (req, res) => {
