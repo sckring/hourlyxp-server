@@ -321,12 +321,17 @@ app.post("/endShift", async (req, res) => {
 app.post("/updateGoals", async (req, res) => {
   const { userId, dailyGoal, weeklyGoal } = req.body;
 
+  if (!userId) {
+    return res.status(400).json({ error: "Missing userId" });
+  }
+
   await supabase
     .from("users")
     .update({
       daily_goal: dailyGoal,
       weekly_goal: weeklyGoal,
-      weekly_notified: false
+      weekly_notified: false,
+      daily_notified: false
     })
     .eq("id", userId);
 
