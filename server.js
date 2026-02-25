@@ -162,49 +162,73 @@ app.post("/debug", (req, res) => {
 
 setInterval(async () => {
   try {
-    const { data: activeShifts } = await supabase
-      .from("shifts")
-      .select("*")
-      .eq("active", true);
+    // Get all users
+    const { data: users, error: usersError } = await supabase
+      .from("users")
+      .select("*");
 
-    if (!activeShifts) return;
+    if (usersError || !users) {
+      console.error("User fetch error:", usersError);
+      return;
+    }
 
-    const users = [...new Set(activeShifts.map(s => s.user_id))];
+    const now = Date.now();
 
+    // Time boundaries
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayStartMs = todayStart.getTime();
 
-    for (const userId of users) {
-      const { data: user } = await supabase
-        .from("users")
-        .select("*")
-        .eq("id", userId)
-        .single();
+    const weekAgoMs = now - 7 * 24 * 60 * 60 * 1000;
 
-      if (!user) continue;
+    for (const user of users) {
+      const userId = user.id;
 
-      // --- Daily Total ---
-      const { data: todaysShifts } = await supabase
+      // Get all shifts from last 7 days (covers both daily + weekly)
+      const { data: shifts, error: shiftsError } = await supabase
         .from("shifts")
         .select("*")
         .eq("user_id", userId)
-        .gte("start_time", todayStartMs);
+        .gte("start_time", weekAgoMs);
 
-      let dailyTotal = (todaysShifts || []).reduce(
-        (sum, s) => sum + (s.total_earned || 0),
-        0
-      );
-
-      // Include currently active shift earnings
-      const userActiveShift = activeShifts.find(s => s.user_id === userId);
-      if (userActiveShift) {
-        const startMs = Number(userActiveShift.start_time);
-        const hoursWorked = (Date.now() - startMs) / 1000 / 60 / 60;
-        dailyTotal += hoursWorked * userActiveShift.hourly_rate;
+      if (shiftsError) {
+        console.error("Shift fetch error:", shiftsError);
+        continue;
       }
 
-      // --- Daily Notification ---
+      let dailyTotal = 0;
+      let weeklyTotal = 0;
+
+      for (const shift of shifts || []) {
+        const startTime = Number(shift.start_time);
+
+        // Weekly total (all last 7 days)
+        if (shift.total_earned) {
+          weeklyTotal += Number(shift.total_earned);
+        }
+
+        // Daily total (only today)
+        if (startTime >= todayStartMs && shift.total_earned) {
+          dailyTotal += Number(shift.total_earned);
+        }
+
+        // If shift is active, calculate live earnings
+        if (shift.active) {
+          const hoursWorked = (now - startTime) / 1000 / 60 / 60;
+          const liveEarned = hoursWorked * shift.hourly_rate;
+
+          weeklyTotal += liveEarned;
+
+          if (startTime >= todayStartMs) {
+            dailyTotal += liveEarned;
+          }
+        }
+      }
+
+      /* ============================= */
+      /* DAILY GOAL CHECK */
+      /* ============================= */
+
       if (
         user.daily_goal &&
         dailyTotal >= user.daily_goal &&
@@ -219,28 +243,13 @@ setInterval(async () => {
           .from("users")
           .update({ daily_notified: true })
           .eq("id", userId);
+
+        console.log("Daily notification sent:", userId);
       }
 
-      // --- Weekly Notification (existing) ---
-      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-
-      const { data: recentShifts } = await supabase
-        .from("shifts")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("start_time", weekAgo);
-
-      let weeklyTotal = (recentShifts || []).reduce(
-        (sum, s) => sum + (s.total_earned || 0),
-        0
-      );
-
-      // Include active shift in weekly total
-      if (userActiveShift) {
-        const startMs = Number(userActiveShift.start_time);
-        const hoursWorked = (Date.now() - startMs) / 1000 / 60 / 60;
-        weeklyTotal += hoursWorked * userActiveShift.hourly_rate;
-      }
+      /* ============================= */
+      /* WEEKLY GOAL CHECK */
+      /* ============================= */
 
       if (
         user.weekly_goal &&
@@ -256,12 +265,14 @@ setInterval(async () => {
           .from("users")
           .update({ weekly_notified: true })
           .eq("id", userId);
+
+        console.log("Weekly notification sent:", userId);
       }
     }
   } catch (err) {
     console.error("Goal checker crash:", err);
   }
-}, 60000);
+}, 60000); // runs every 60 seconds
 
 app.post("/resetDaily", async (req, res) => {
   const { userId } = req.body;
