@@ -21,6 +21,14 @@ webpush.setVapidDetails("mailto:sckring@gmail.com", PUBLIC_KEY, PRIVATE_KEY);
 
 console.log("Supabase URL:", process.env.SUPABASE_URL);
 
+process.on("unhandledRejection", err => {
+  console.error("UNHANDLED REJECTION:", err);
+});
+
+process.on("uncaughtException", err => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+});
+
 // … rest of your routes …
 
 /* ============================= */
@@ -184,7 +192,6 @@ setInterval(async () => {
     for (const user of users) {
       const userId = user.id;
 
-      // Get all shifts from last 7 days (covers both daily + weekly)
       const { data: shifts, error: shiftsError } = await supabase
         .from("shifts")
         .select("*")
@@ -202,33 +209,26 @@ setInterval(async () => {
       for (const shift of shifts || []) {
         const startTime = Number(shift.start_time);
 
-       for (const shift of shifts || []) {
-  const startTime = Number(shift.start_time);
+        const isActive = shift.active === true && !shift.end_time;
+        const hasStoredTotal = shift.total_earned != null;
 
-  const isActive = shift.active === true && !shift.end_time;
-  const hasStoredTotal = shift.total_earned != null;
+        let earned = 0;
 
-  let earned = 0;
+        if (isActive) {
+          const hoursWorked = (now - startTime) / 1000 / 60 / 60;
+          earned = hoursWorked * shift.hourly_rate;
+        } else if (hasStoredTotal) {
+          earned = Number(shift.total_earned);
+        }
 
-  if (isActive) {
-    // Calculate live earnings ONLY if active
-    const hoursWorked = (now - startTime) / 1000 / 60 / 60;
-    earned = hoursWorked * shift.hourly_rate;
-  } else if (hasStoredTotal) {
-    // Otherwise use stored total
-    earned = Number(shift.total_earned);
-  }
+        if (startTime >= weekAgoMs) {
+          weeklyTotal += earned;
+        }
 
-  // Add to weekly total if within 7 days
-  if (startTime >= weekAgoMs) {
-    weeklyTotal += earned;
-  }
-
-  // Add to daily total if today
-  if (startTime >= todayStartMs) {
-    dailyTotal += earned;
-  }
-}
+        if (startTime >= todayStartMs) {
+          dailyTotal += earned;
+        }
+      }
 
       /* ============================= */
       /* DAILY GOAL CHECK */
@@ -277,7 +277,7 @@ setInterval(async () => {
   } catch (err) {
     console.error("Goal checker crash:", err);
   }
-}, 60000); // runs every 60 seconds
+}, 60000);
 
 app.post("/resetDaily", async (req, res) => {
   const { userId } = req.body;
