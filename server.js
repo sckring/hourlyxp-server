@@ -202,28 +202,33 @@ setInterval(async () => {
       for (const shift of shifts || []) {
         const startTime = Number(shift.start_time);
 
-        // Weekly total (all last 7 days)
-        if (shift.total_earned) {
-          weeklyTotal += Number(shift.total_earned);
-        }
+       for (const shift of shifts || []) {
+  const startTime = Number(shift.start_time);
 
-        // Daily total (only today)
-        if (startTime >= todayStartMs && shift.total_earned) {
-          dailyTotal += Number(shift.total_earned);
-        }
+  const isActive = shift.active === true && !shift.end_time;
+  const hasStoredTotal = shift.total_earned != null;
 
-        // If shift is active, calculate live earnings
-        if (shift.active) {
-          const hoursWorked = (now - startTime) / 1000 / 60 / 60;
-          const liveEarned = hoursWorked * shift.hourly_rate;
+  let earned = 0;
 
-          weeklyTotal += liveEarned;
+  if (isActive) {
+    // Calculate live earnings ONLY if active
+    const hoursWorked = (now - startTime) / 1000 / 60 / 60;
+    earned = hoursWorked * shift.hourly_rate;
+  } else if (hasStoredTotal) {
+    // Otherwise use stored total
+    earned = Number(shift.total_earned);
+  }
 
-          if (startTime >= todayStartMs) {
-            dailyTotal += liveEarned;
-          }
-        }
-      }
+  // Add to weekly total if within 7 days
+  if (startTime >= weekAgoMs) {
+    weeklyTotal += earned;
+  }
+
+  // Add to daily total if today
+  if (startTime >= todayStartMs) {
+    dailyTotal += earned;
+  }
+}
 
       /* ============================= */
       /* DAILY GOAL CHECK */
@@ -286,6 +291,15 @@ app.post("/resetDaily", async (req, res) => {
   if (error) return res.status(500).json({ error });
 
   res.json({ success: true, resetAt: Date.now() });
+});
+
+app.post("/resetWeekly", async (req, res) => {
+  const { userId } = req.body;
+  await supabase
+    .from("users")
+    .update({ weekly_notified: false })
+    .eq("id", userId);
+  res.sendStatus(200);
 });
 
 app.post("/endShift", async (req, res) => {
