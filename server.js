@@ -60,9 +60,13 @@ async function sendToUser(userId, payloadObj) {
 
   for (const row of subs) {
     try {
-      await webpush.sendNotification(row.subscription, payload);
+      await Promise.race([
+        webpush.sendNotification(row.subscription, payload),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Push timeout")), 5000)
+        )
+      ]);
     } catch (err) {
-      // Auto-clean expired subscriptions
       if (err.statusCode === 410 || err.statusCode === 404) {
         await supabase
           .from("subscriptions")
@@ -168,116 +172,182 @@ app.post("/debug", (req, res) => {
   res.json(req.body);
 });
 
-setInterval(async () => {
-  try {
-    // Get all users
-    const { data: users, error: usersError } = await supabase
-      .from("users")
-      .select("*");
+async function checkUserGoals(userId) {
+  const now = Date.now();
 
-    if (usersError || !users) {
-      console.error("User fetch error:", usersError);
-      return;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayStartMs = todayStart.getTime();
+
+  const weekAgoMs = now - 7 * 24 * 60 * 60 * 1000;
+
+  const { data: user } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", userId)
+    .single();
+
+  if (!user) return;
+
+  const { data: shifts } = await supabase
+    .from("shifts")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("start_time", weekAgoMs);
+
+  let dailyTotal = 0;
+  let weeklyTotal = 0;
+
+  for (const shift of shifts || []) {
+    const startTime = Number(shift.start_time);
+    const isActive = shift.active === true && !shift.end_time;
+
+    let earned = 0;
+
+    if (isActive) {
+      const hoursWorked = (now - startTime) / 1000 / 60 / 60;
+      earned = hoursWorked * shift.hourly_rate;
+    } else if (shift.total_earned != null) {
+      earned = Number(shift.total_earned);
     }
 
+    if (startTime >= weekAgoMs) weeklyTotal += earned;
+    if (startTime >= todayStartMs) dailyTotal += earned;
+  }
+
+  // DAILY
+  if (
+    user.daily_goal &&
+    dailyTotal >= user.daily_goal &&
+    !user.daily_notified
+  ) {
+    await sendToUser(userId, {
+      title: "🎯 Daily Goal Reached!",
+      body: `Today's total: $${dailyTotal.toFixed(2)}`
+    });
+
+    await supabase
+      .from("users")
+      .update({ daily_notified: true })
+      .eq("id", userId);
+  }
+
+  // WEEKLY
+  if (
+    user.weekly_goal &&
+    weeklyTotal >= user.weekly_goal &&
+    !user.weekly_notified
+  ) {
+    await sendToUser(userId, {
+      title: "🏆 Weekly Goal Crushed!",
+      body: `Weekly total: $${weeklyTotal.toFixed(2)}`
+    });
+
+    await supabase
+      .from("users")
+      .update({ weekly_notified: true })
+      .eq("id", userId);
+  }
+}
+
+setInterval(async () => {
+  try {
     const now = Date.now();
 
-    // Time boundaries
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayStartMs = todayStart.getTime();
 
     const weekAgoMs = now - 7 * 24 * 60 * 60 * 1000;
 
-    for (const user of users) {
-      const userId = user.id;
+    // ✅ ONLY get users who have active shifts
+    const { data: activeShifts, error: shiftError } = await supabase
+      .from("shifts")
+      .select("user_id")
+      .eq("active", true);
 
-      const { data: shifts, error: shiftsError } = await supabase
-        .from("shifts")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("start_time", weekAgoMs);
-
-      if (shiftsError) {
-        console.error("Shift fetch error:", shiftsError);
-        continue;
-      }
-
-      let dailyTotal = 0;
-      let weeklyTotal = 0;
-
-      for (const shift of shifts || []) {
-        const startTime = Number(shift.start_time);
-
-        const isActive = shift.active === true && !shift.end_time;
-        const hasStoredTotal = shift.total_earned != null;
-
-        let earned = 0;
-
-        if (isActive) {
-          const hoursWorked = (now - startTime) / 1000 / 60 / 60;
-          earned = hoursWorked * shift.hourly_rate;
-        } else if (hasStoredTotal) {
-          earned = Number(shift.total_earned);
-        }
-
-        if (startTime >= weekAgoMs) {
-          weeklyTotal += earned;
-        }
-
-        if (startTime >= todayStartMs) {
-          dailyTotal += earned;
-        }
-      }
-
-      /* ============================= */
-      /* DAILY GOAL CHECK */
-      /* ============================= */
-
-      if (
-        user.daily_goal &&
-        dailyTotal >= user.daily_goal &&
-        !user.daily_notified
-      ) {
-        await sendToUser(userId, {
-          title: "🎯 Daily Goal Reached!",
-          body: `Today's total: $${dailyTotal.toFixed(2)}`
-        });
-
-        await supabase
-          .from("users")
-          .update({ daily_notified: true })
-          .eq("id", userId);
-
-        console.log("Daily notification sent:", userId);
-      }
-
-      /* ============================= */
-      /* WEEKLY GOAL CHECK */
-      /* ============================= */
-
-      if (
-        user.weekly_goal &&
-        weeklyTotal >= user.weekly_goal &&
-        !user.weekly_notified
-      ) {
-        await sendToUser(userId, {
-          title: "🏆 Weekly Goal Crushed!",
-          body: `Weekly total: $${weeklyTotal.toFixed(2)}`
-        });
-
-        await supabase
-          .from("users")
-          .update({ weekly_notified: true })
-          .eq("id", userId);
-
-        console.log("Weekly notification sent:", userId);
-      }
+    if (shiftError || !activeShifts || activeShifts.length === 0) {
+      return; // nothing to check
     }
+
+    // 👇 THIS IS WHERE YOUR LINE GOES
+    const activeUserIds = [...new Set(activeShifts.map(s => s.user_id))];
+
+    await Promise.all(
+      activeUserIds.map(async (userId) => {
+        const { data: user } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", userId)
+          .single();
+
+        if (!user) return;
+
+        const { data: shifts } = await supabase
+          .from("shifts")
+          .select("*")
+          .eq("user_id", userId)
+          .gte("start_time", weekAgoMs);
+
+        let dailyTotal = 0;
+        let weeklyTotal = 0;
+
+        for (const shift of shifts || []) {
+          const startTime = Number(shift.start_time);
+          const isActive = shift.active === true && !shift.end_time;
+
+          let earned = 0;
+
+          if (isActive) {
+            const hoursWorked = (now - startTime) / 1000 / 60 / 60;
+            earned = hoursWorked * shift.hourly_rate;
+          } else if (shift.total_earned != null) {
+            earned = Number(shift.total_earned);
+          }
+
+          if (startTime >= weekAgoMs) weeklyTotal += earned;
+          if (startTime >= todayStartMs) dailyTotal += earned;
+        }
+
+        // DAILY
+        if (
+          user.daily_goal &&
+          dailyTotal >= user.daily_goal &&
+          !user.daily_notified
+        ) {
+          await sendToUser(userId, {
+            title: "🎯 Daily Goal Reached!",
+            body: `Today's total: $${dailyTotal.toFixed(2)}`
+          });
+
+          await supabase
+            .from("users")
+            .update({ daily_notified: true })
+            .eq("id", userId);
+        }
+
+        // WEEKLY
+        if (
+          user.weekly_goal &&
+          weeklyTotal >= user.weekly_goal &&
+          !user.weekly_notified
+        ) {
+          await sendToUser(userId, {
+            title: "🏆 Weekly Goal Crushed!",
+            body: `Weekly total: $${weeklyTotal.toFixed(2)}`
+          });
+
+          await supabase
+            .from("users")
+            .update({ weekly_notified: true })
+            .eq("id", userId);
+        }
+      })
+    );
   } catch (err) {
     console.error("Goal checker crash:", err);
   }
-}, 60000);
+}, 120000); // run every 2 minutes instead of 1
 
 app.post("/resetDaily", async (req, res) => {
   const { userId } = req.body;
