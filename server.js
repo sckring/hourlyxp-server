@@ -154,7 +154,13 @@ app.post("/startShift", async (req, res) => {
 
   const { data, error } = await supabase
   .from("shifts")
-  .insert([...])
+  .insert([{
+	user_id: userId,
+    start_time: startTimeNum,
+    hourly_rate: hourlyRate,
+    active: true,
+    daily_notified: false
+   }])
   .select()
   .single();
 
