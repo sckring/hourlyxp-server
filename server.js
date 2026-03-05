@@ -415,6 +415,10 @@ app.post("/updateGoals", async (req, res) => {
   res.sendStatus(200);
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
+
 /* ============================= */
 
 const PORT = process.env.PORT || 3000;
