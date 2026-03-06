@@ -120,6 +120,64 @@ async function scheduleGoalCheck(userId, shift) {
   scheduledGoals.set(userId, timer);
 }
 
+async function scheduleWeeklyGoalCheck(userId, shift) {
+  if (!shift) return;
+
+  const now = Date.now();
+  const startTime = Number(shift.start_time);
+  const hourlyRate = Number(shift.hourly_rate);
+
+  if (!startTime || !hourlyRate) return;
+
+  const weekAgoMs = now - 7 * 24 * 60 * 60 * 1000;
+
+  const { data: user } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", userId)
+    .single();
+
+  if (!user || !user.weekly_goal) return;
+
+  const { data: shifts } = await supabase
+    .from("shifts")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("start_time", weekAgoMs);
+
+  let weeklyTotal = 0;
+
+  for (const s of shifts || []) {
+    const sStart = Number(s.start_time);
+    const isActive = s.active === true && !s.end_time;
+
+    if (isActive) {
+      const hoursWorked = (now - sStart) / 1000 / 60 / 60;
+      weeklyTotal += hoursWorked * s.hourly_rate;
+    } else if (s.total_earned != null) {
+      weeklyTotal += Number(s.total_earned);
+    }
+  }
+
+  const remaining = user.weekly_goal - weeklyTotal;
+
+  if (remaining <= 0) {
+    await triggerWeeklyGoal(userId, user.weekly_goal);
+    return;
+  }
+
+  const hoursUntilGoal = remaining / hourlyRate;
+  const msUntilGoal = hoursUntilGoal * 60 * 60 * 1000;
+
+  if (msUntilGoal <= 0) return;
+
+  const timer = setTimeout(async () => {
+    await triggerWeeklyGoal(userId, user.weekly_goal);
+  }, msUntilGoal);
+
+  scheduledGoals.set(`${userId}_weekly`, timer);
+}
+
 async function triggerDailyGoal(userId, goalAmount) {
   const { data: user } = await supabase
     .from("users")
@@ -137,6 +195,26 @@ async function triggerDailyGoal(userId, goalAmount) {
   await supabase
     .from("users")
     .update({ daily_notified: true })
+    .eq("id", userId);
+}
+
+async function triggerWeeklyGoal(userId, goalAmount) {
+  const { data: user } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", userId)
+    .single();
+
+  if (!user || user.weekly_notified) return;
+
+  await sendToUser(userId, {
+    title: "🏆 Weekly Goal Crushed!",
+    body: `You've hit your $${goalAmount} weekly goal!`
+  });
+
+  await supabase
+    .from("users")
+    .update({ weekly_notified: true })
     .eq("id", userId);
 }
 
@@ -167,6 +245,8 @@ app.post("/startShift", async (req, res) => {
 if (error) return res.status(500).json({ error });
 
 await scheduleGoalCheck(userId, data);
+await scheduleWeeklyGoalCheck(userId, data);
+await checkUserGoals(userId);
 
 res.json(data);
 });
@@ -378,6 +458,11 @@ app.post("/endShift", async (req, res) => {
     clearTimeout(scheduledGoals.get(userId));
     scheduledGoals.delete(userId);
   }
+  
+  if (scheduledGoals.has(`${userId}_weekly`)) {
+  clearTimeout(scheduledGoals.get(`${userId}_weekly`));
+  scheduledGoals.delete(`${userId}_weekly`);
+}
 
   // 🧠 Final goal check (in case they crossed goal exactly at end)
   const { data: user } = await supabase
@@ -391,6 +476,8 @@ app.post("/endShift", async (req, res) => {
       await triggerDailyGoal(userId, user.daily_goal);
     }
   }
+  
+  await checkUserGoals(userId);
 
   res.send("Shift ended successfully");
 });
