@@ -319,7 +319,7 @@ async function checkUserGoals(userId) {
   todayStart.setHours(0, 0, 0, 0);
   const todayStartMs = todayStart.getTime();
 
-  const weekAgoMs = now - 7 * 24 * 60 * 60 * 1000;
+  const weekAgoMs = user.week_start || (now - 7 * 24 * 60 * 60 * 1000);
 
   const { data: user } = await supabase
     .from("users")
@@ -406,10 +406,24 @@ app.post("/resetDaily", async (req, res) => {
 
 app.post("/resetWeekly", async (req, res) => {
   const { userId } = req.body;
-  await supabase
+
+  if (!userId) return res.status(400).send("Missing userId");
+
+  const now = Date.now();
+
+  const { error } = await supabase
     .from("users")
-    .update({ weekly_notified: false })
+    .update({
+      weekly_notified: false,
+      week_start: now
+    })
     .eq("id", userId);
+
+  if (error) {
+    console.error(error);
+    return res.status(500).send("Database error");
+  }
+
   res.sendStatus(200);
 });
 
