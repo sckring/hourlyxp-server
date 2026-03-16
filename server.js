@@ -315,12 +315,6 @@ app.post("/debug", (req, res) => {
 async function checkUserGoals(userId) {
   const now = Date.now();
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayStartMs = todayStart.getTime();
-
-  const weekAgoMs = user.week_start || (now - 7 * 24 * 60 * 60 * 1000);
-
   const { data: user } = await supabase
     .from("users")
     .select("*")
@@ -329,11 +323,11 @@ async function checkUserGoals(userId) {
 
   if (!user) return;
 
-  const { data: shifts } = await supabase
-    .from("shifts")
-    .select("*")
-    .eq("user_id", userId)
-    .gte("start_time", weekAgoMs);
+  const todayStart = new Date();
+  todayStart.setHours(0,0,0,0);
+  const todayStartMs = todayStart.getTime();
+
+  const weekAgoMs = user.week_start || (now - 7 * 24 * 60 * 60 * 1000);
 
   let dailyTotal = 0;
   let weeklyTotal = 0;
