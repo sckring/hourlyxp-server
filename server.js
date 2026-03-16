@@ -246,7 +246,12 @@ if (error) return res.status(500).json({ error });
 
 await scheduleGoalCheck(userId, data);
 await scheduleWeeklyGoalCheck(userId, data);
-await checkUserGoals(userId);
+try {
+	await checkUserGoals(userId);
+} catch (err) {
+	console.error("Goal check error:", err);
+}
+
 
 res.json(data);
 });
@@ -315,6 +320,7 @@ app.post("/debug", (req, res) => {
 async function checkUserGoals(userId) {
   const now = Date.now();
 
+  // Get user
   const { data: user } = await supabase
     .from("users")
     .select("*")
@@ -323,11 +329,19 @@ async function checkUserGoals(userId) {
 
   if (!user) return;
 
+  // Time boundaries
   const todayStart = new Date();
-  todayStart.setHours(0,0,0,0);
+  todayStart.setHours(0, 0, 0, 0);
   const todayStartMs = todayStart.getTime();
 
   const weekAgoMs = user.week_start || (now - 7 * 24 * 60 * 60 * 1000);
+
+  // Fetch shifts for the user
+  const { data: shifts } = await supabase
+    .from("shifts")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("start_time", weekAgoMs);
 
   let dailyTotal = 0;
   let weeklyTotal = 0;
@@ -349,12 +363,8 @@ async function checkUserGoals(userId) {
     if (startTime >= todayStartMs) dailyTotal += earned;
   }
 
-  // DAILY
-  if (
-    user.daily_goal &&
-    dailyTotal >= user.daily_goal &&
-    !user.daily_notified
-  ) {
+  // DAILY GOAL
+  if (user.daily_goal && dailyTotal >= user.daily_goal && !user.daily_notified) {
     await sendToUser(userId, {
       title: "🎯 Daily Goal Reached!",
       body: `Today's total: $${dailyTotal.toFixed(2)}`
@@ -366,12 +376,8 @@ async function checkUserGoals(userId) {
       .eq("id", userId);
   }
 
-  // WEEKLY
-  if (
-    user.weekly_goal &&
-    weeklyTotal >= user.weekly_goal &&
-    !user.weekly_notified
-  ) {
+  // WEEKLY GOAL
+  if (user.weekly_goal && weeklyTotal >= user.weekly_goal && !user.weekly_notified) {
     await sendToUser(userId, {
       title: "🏆 Weekly Goal Crushed!",
       body: `Weekly total: $${weeklyTotal.toFixed(2)}`
