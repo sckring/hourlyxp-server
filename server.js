@@ -143,7 +143,7 @@ async function scheduleWeeklyGoalCheck(userId, shift) {
     .from("shifts")
     .select("*")
     .eq("user_id", userId)
-    .gte("start_time", weekAgoMs);
+    .gte("start_time", Math.min(todayStartMs, weekAgoMs));
 
   let weeklyTotal = 0;
 
