@@ -129,8 +129,7 @@ async function scheduleWeeklyGoalCheck(userId, shift) {
 
   if (!startTime || !hourlyRate) return;
 
-  const weekAgoMs = now - 7 * 24 * 60 * 60 * 1000;
-
+  // Get user (for goal + week_start)
   const { data: user } = await supabase
     .from("users")
     .select("*")
@@ -139,16 +138,22 @@ async function scheduleWeeklyGoalCheck(userId, shift) {
 
   if (!user || !user.weekly_goal) return;
 
+  const weekStart = user.week_start || (now - 7 * 24 * 60 * 60 * 1000);
+
+  // Get ALL shifts (we filter manually for safety)
   const { data: shifts } = await supabase
     .from("shifts")
     .select("*")
-    .eq("user_id", userId)
-    .gte("start_time", Math.min(todayStartMs, weekAgoMs));
+    .eq("user_id", userId);
 
   let weeklyTotal = 0;
 
   for (const s of shifts || []) {
     const sStart = Number(s.start_time);
+
+    // Only count shifts in current week
+    if (sStart < weekStart) continue;
+
     const isActive = s.active === true && !s.end_time;
 
     if (isActive) {
@@ -161,21 +166,30 @@ async function scheduleWeeklyGoalCheck(userId, shift) {
 
   const remaining = user.weekly_goal - weeklyTotal;
 
+  // If already hit goal → trigger immediately
   if (remaining <= 0) {
     await triggerWeeklyGoal(userId, user.weekly_goal);
     return;
   }
 
+  // Predict when current shift will hit goal
   const hoursUntilGoal = remaining / hourlyRate;
   const msUntilGoal = hoursUntilGoal * 60 * 60 * 1000;
 
   if (msUntilGoal <= 0) return;
 
+  // Clear existing timer if it exists
+  const key = `${userId}_weekly`;
+  if (scheduledGoals.has(key)) {
+    clearTimeout(scheduledGoals.get(key));
+  }
+
   const timer = setTimeout(async () => {
     await triggerWeeklyGoal(userId, user.weekly_goal);
+    scheduledGoals.delete(key);
   }, msUntilGoal);
 
-  scheduledGoals.set(`${userId}_weekly`, timer);
+  scheduledGoals.set(key, timer);
 }
 
 async function triggerDailyGoal(userId, goalAmount) {
@@ -245,7 +259,11 @@ app.post("/startShift", async (req, res) => {
 if (error) return res.status(500).json({ error });
 
 await scheduleGoalCheck(userId, data);
-await scheduleWeeklyGoalCheck(userId, data);
+try {
+	await scheduleWeeklyGoalCheck(userId, data);
+} catch (err) {
+	console.error("Weekly schedule error:", err);
+}
 try {
 	await checkUserGoals(userId);
 } catch (err) {
